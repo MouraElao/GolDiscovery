@@ -1,0 +1,16 @@
+# Arquivo de configuração SSH para o projeto GolDiscovery
+# Usado para permitir a conexão com dispositivos legados.
+
+Host 192.168.166.*
+    # Permite o uso de algoritmos de troca de chaves (Kex) mais antigos
+    KexAlgorithms +diffie-hellman-group1-sha1
+
+    # Permite o uso de cifras (Ciphers) mais antigas
+    Ciphers +aes128-cbc
+
+    # Permite algoritmos de chave de host (HostKey) baseados em RSA/SHA1
+    HostKeyAlgorithms +ssh-rsa
+    PubkeyAcceptedAlgorithms +ssh-rsa
+
+    # Permite algoritmos de MAC mais antigos
+    MACs +hmac-sha1
