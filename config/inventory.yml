@@ -1,6 +1,6 @@
 devices:
   - name: "Roteador-3725"
-    host: "192.168.166.151"  # <-- O IP de acesso via DHCP
+    host: "192.168.166.170"  # <-- O IP de acesso via DHCP
     device_type: "cisco_ios"
     username: "admin"             # Seu usuário
     password: "cisco123"          # Sua senha
