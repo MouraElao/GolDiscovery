@@ -2,18 +2,14 @@
 
 import pandas as pd
 
+# Define as interfaces que consideramos de gerenciamento
 MANAGEMENT_INTERFACES = {'FastEthernet0/1'}
 
-def get_base_hostname(hostname):
-    """ Retorna a parte do hostname antes do primeiro ponto (e em minúsculas), ou None. """
-    if isinstance(hostname, str):
-        return hostname.split('.')[0].lower().strip()
-    return None
 
 def save_to_excel(list_of_connections: list[dict], filename: str):
     """
-    Recebe uma lista de conexões, filtra dados, remove duplicatas de forma robusta
-    e salva no formato de bloco.
+    Recebe uma lista de conexões, filtra os links de dados,
+    e salva um relatório "centrado no dispositivo" com colunas autoajustadas.
     """
     if not list_of_connections:
         print("AVISO: Nenhuma conexão para salvar no relatório.")
@@ -22,78 +18,80 @@ def save_to_excel(list_of_connections: list[dict], filename: str):
     # --- ETAPA 1: FILTRAR APENAS OS LINKS DE DADOS ---
     data_links_only = []
     for conn in list_of_connections:
-        # Verifica se AMBAS as interfaces NÃO são de gerenciamento
         local_if = conn.get('local_interface')
         remote_if = conn.get('remote_port')
+        # Mantém apenas os links que NÃO são da rede de gerenciamento
         if local_if not in MANAGEMENT_INTERFACES and remote_if not in MANAGEMENT_INTERFACES:
             data_links_only.append(conn)
-        else:
-            # Opcional: Log para ver quais links foram ignorados
-            # print(f"DEBUG: Ignorando link de gerenciamento: {conn.get('source_hostname')}({local_if}) <-> {conn.get('neighbor_id')}({remote_if})")
-            pass
 
-    print(f"\n>>> Total de conexões CDP encontradas: {len(list_of_connections)}. Filtradas para dados: {len(data_links_only)}.")
+    print(
+        f"\n>>> Total de conexões CDP encontradas: {len(list_of_connections)}. Filtradas para dados: {len(data_links_only)}.")
 
-    # --- ETAPA 2: LIMPEZA DE DUPLICATAS (Refinada) ---
-    seen_links_identifiers = set()
-    unique_data_links_final = []
+    if not data_links_only:
+        print("AVISO: Nenhum link de dados encontrado para salvar.")
+        return
 
-    print(f"\n>>> Processando {len(data_links_only)} links de dados para gerar relatório único...")
+    # --- ETAPA 2: TRANSFORMAR OS DADOS NO FORMATO DE RELATÓRIO ---
 
-    for link in data_links_only:
-        # Usa a função auxiliar para pegar os nomes base e em minúsculas
-        hostname_a = get_base_hostname(link.get('source_hostname'))
-        hostname_b = get_base_hostname(link.get('neighbor_id'))
+    # Converte a lista de links em um DataFrame do Pandas
+    df_links = pd.DataFrame(data_links_only)
 
-        # Garante que temos ambos os nomes antes de criar o identificador
-        if hostname_a and hostname_b:
-            # Cria o identificador ordenado (garante A->B == B->A)
-            link_identifier = tuple(sorted((hostname_a, hostname_b)))
+    # Agrupa todos os links pelo dispositivo "raiz"
+    grouped = df_links.groupby('source_hostname')
 
-            # SÓ adiciona à lista final se o link físico ainda não foi visto
-            if link_identifier not in seen_links_identifiers:
-                unique_data_links_final.append(link)
-                seen_links_identifiers.add(link_identifier)
-        else:
-            print(f"AVISO: Link ignorado na limpeza por falta de nome de dispositivo: {link}")
+    report_rows = []
 
-    print(f"\n>>> Total de links únicos reportados no Excel: {len(unique_data_links_final)}.")
+    print(f"\n>>> Gerando relatório centrado em dispositivo para {len(grouped)} dispositivos...")
 
-    # --- ETAPA 3: FORMATAÇÃO DO RELATÓRIO ---
+    # Itera sobre cada grupo (R1, S1, S2...)
+    for source_name, group_data in grouped:
+        # Pega a primeira linha do grupo para os dados da "raiz"
+        first_row = group_data.iloc[0]
+
+        # 1. Adiciona a linha "Dispositivo Principal" (em negrito no Excel)
+        report_rows.append({
+            'Conexão': f'Dispositivo Principal: {source_name}',
+            'IP': first_row.get('source_ip'),
+            'Interface': '',  # Interface fica em branco para a linha principal
+            'Dispositivo': '',  # Dispositivo fica em branco
+            'Plataforma': first_row.get('source_platform')
+        })
+
+        # 2. Adiciona uma linha "Vizinho Conectado" para cada link nesse grupo
+        for _, neighbor in group_data.iterrows():
+            report_rows.append({
+                'Conexão': '  -> Vizinho Conectado:',  # Indentação para clareza
+                'IP': neighbor.get('neighbor_ip'),
+                'Interface': neighbor.get('local_interface'),  # Interface local do dispositivo raiz
+                'Dispositivo': neighbor.get('neighbor_id'),
+                'Plataforma': neighbor.get('neighbor_platform')
+            })
+
+        # 3. Adiciona uma linha em branco para separar os blocos
+        report_rows.append({})
+
+    # --- ETAPA 3: SALVAR O EXCEL COM FORMATAÇÃO ---
     try:
-        report_rows = []
+        # Cria o DataFrame final formatado
+        df_report = pd.DataFrame(report_rows)
 
-        if not unique_data_links_final:
-             print("AVISO: Nenhum link de dados único encontrado para salvar.")
-             return
+        # Cria um "escritor" de Excel usando o xlsxwriter
+        with pd.ExcelWriter(filename, engine='xlsxwriter') as writer:
+            df_report.to_excel(writer, sheet_name='Topologia', index=False)
 
-        # Itera sobre os links ÚNICOS FINAIS
-        for connection in unique_data_links_final:
-            source_row = {
-                'Conexão': 'Dispositivo Raiz',
-                'IP': connection.get('source_ip'),
-                'Interface': connection.get('local_interface'),
-                'Dispositivo': connection.get('source_hostname'), # Mantém o nome original no relatório
-                'Plataforma': connection.get('source_platform')
-            }
-            report_rows.append(source_row)
+            # Pega o objeto da planilha para formatar
+            worksheet = writer.sheets['Topologia']
 
-            neighbor_row = {
-                'Conexão': 'Vizinho Conectado',
-                'IP': connection.get('neighbor_ip'),
-                'Interface': connection.get('remote_port'),
-                'Dispositivo': connection.get('neighbor_id'), # Mantém o nome original no relatório
-                'Plataforma': connection.get('neighbor_platform')
-            }
-            report_rows.append(neighbor_row)
+            # Autoajusta a largura das colunas
+            for idx, col in enumerate(df_report.columns):
+                series = df_report[col]
+                max_len = max(
+                    (series.astype(str).map(len).max() or 0),  # Comprimento do maior dado
+                    len(str(col))  # Comprimento do título da coluna
+                ) + 2  # Adiciona uma pequena margem
+                worksheet.set_column(idx, idx, max_len)
 
-            blank_row = {}
-            report_rows.append(blank_row)
-
-        df = pd.DataFrame(report_rows)
-
-        df.to_excel(filename, index=False)
-        print(f"\n✅ Relatório de conexões salvo com sucesso em: {filename}")
+        print(f"\n✅ Relatório de topologia salvo com sucesso em: {filename}")
 
     except Exception as e:
         print(f"\n❌ FALHA ao salvar o relatório Excel: {e}")
