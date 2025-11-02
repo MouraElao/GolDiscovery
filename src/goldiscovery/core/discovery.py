@@ -69,23 +69,11 @@ def start_discovery():
                 # 4. COLETA E PROCESSAMENTO
                 cdp_output = net_connect.send_command("show cdp neighbors detail")
 
-                # --- CÓDIGO ANTIGO DO SEU SCRIPT (TINHA UM BUG) ---
-                # parsed_neighbors = parse_cdp_neighbors_detail(cdp_output)
-                # --- CÓDIGO CORRIGIDO (passando o hostname) ---
                 parsed_neighbors = parse_cdp_neighbors_detail(
-                    cdp_output)  # O parser.py precisa ser atualizado se quisermos a lógica antiga
-
-                # NOTA: O seu parsers.py pode estar esperando o source_hostname.
-                # Se o código acima falhar, use este:
-                # parsed_neighbors = parse_cdp_neighbors_detail(cdp_output, source_hostname)
-                # E ajuste o parser.py de acordo.
-                # Assumindo que o parser.py foi o que eu te enviei:
+                    cdp_output)
 
                 parsed_neighbors = parse_cdp_neighbors_detail(
-                    cdp_output)  # Vou assumir que o parser.py é o que você tinha que estava funcionando.
-
-                # Re-lendo o seu código, vejo que o parser não precisa do source_hostname
-                # A lógica de conexão completa é criada aqui:
+                    cdp_output)
 
                 # 5. REGISTRO E EXPANSÃO DA BUSCA
                 for neighbor in parsed_neighbors:
