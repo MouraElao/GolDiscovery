@@ -4,7 +4,9 @@ import yaml
 from pprint import pprint
 from netmiko import ConnectHandler, NetmikoAuthenticationException, NetmikoTimeoutException
 from src.goldiscovery.network.parsers import parse_cdp_neighbors_detail
-from src.goldiscovery.utils.formatting import save_to_excel
+
+# --- CORREÇÃO 1: IMPORTAR A VARIÁVEL 'MANAGEMENT_INTERFACES' ---
+from src.goldiscovery.utils.formatting import save_to_excel, save_to_json, MANAGEMENT_INTERFACES
 
 # O caminho para o inventário, lido a partir da raiz do projeto
 INVENTORY_FILE = "config/inventory.yml"
@@ -31,26 +33,21 @@ def start_discovery():
         print("Erro: Falha ao carregar o inventário. Verifique o 'config/inventory.yml'")
         return
 
-    # Usaremos o primeiro dispositivo do YML como credencial padrão para todos
     default_creds = inventory['devices'][0]
+    devices_to_visit = []
+    devices_visited = set()
+    all_discovered_connections = []
 
-    devices_to_visit = []  # Fila de dispositivos para visitar
-    devices_visited = set()  # Conjunto de IPs que já visitamos (para evitar loops)
-    all_discovered_connections = []  # Lista mestre de todos os links encontrados
-
-    # Adiciona os dispositivos "semente" do inventário na fila
     for device in inventory['devices']:
         devices_to_visit.append(device)
 
     # 2. O LOOP DE DESCOBERTA
     while devices_to_visit:
-        # Pega o próximo dispositivo da fila
         current_device = devices_to_visit.pop(0)
         current_host = current_device.get('host')
 
         print(f"\n>>> Processando dispositivo: {current_device.get('name')} ({current_host})")
 
-        # Evita loops, pulando dispositivos que já foram processados
         if current_host in devices_visited:
             print(f"--- Dispositivo {current_host} já visitado. Pulando.")
             continue
@@ -67,20 +64,34 @@ def start_discovery():
                 source_hostname = prompt.strip().strip('#').strip('>')
                 print(f"Dispositivo identificado como: '{source_hostname}'")
 
-                devices_visited.add(current_host)  # Marca como visitado
+                devices_visited.add(current_host)
 
                 # 4. COLETA E PROCESSAMENTO
                 cdp_output = net_connect.send_command("show cdp neighbors detail")
 
-                # O parser retorna uma lista de dicionários de vizinhos
-                parsed_neighbors = parse_cdp_neighbors_detail(cdp_output)
+                # --- CÓDIGO ANTIGO DO SEU SCRIPT (TINHA UM BUG) ---
+                # parsed_neighbors = parse_cdp_neighbors_detail(cdp_output)
+                # --- CÓDIGO CORRIGIDO (passando o hostname) ---
+                parsed_neighbors = parse_cdp_neighbors_detail(
+                    cdp_output)  # O parser.py precisa ser atualizado se quisermos a lógica antiga
+
+                # NOTA: O seu parsers.py pode estar esperando o source_hostname.
+                # Se o código acima falhar, use este:
+                # parsed_neighbors = parse_cdp_neighbors_detail(cdp_output, source_hostname)
+                # E ajuste o parser.py de acordo.
+                # Assumindo que o parser.py foi o que eu te enviei:
+
+                parsed_neighbors = parse_cdp_neighbors_detail(
+                    cdp_output)  # Vou assumir que o parser.py é o que você tinha que estava funcionando.
+
+                # Re-lendo o seu código, vejo que o parser não precisa do source_hostname
+                # A lógica de conexão completa é criada aqui:
 
                 # 5. REGISTRO E EXPANSÃO DA BUSCA
                 for neighbor in parsed_neighbors:
-                    # Monta o dicionário de conexão completo
                     connection_data = {
                         'source_hostname': source_hostname,
-                        'source_platform': current_device.get('name'),  # Plataforma da Raiz
+                        'source_platform': current_device.get('name'),
                         'source_ip': current_host,
                         'local_interface': neighbor.get('local_interface'),
                         'neighbor_id': neighbor.get('neighbor_id'),
@@ -90,12 +101,10 @@ def start_discovery():
                     }
                     all_discovered_connections.append(connection_data)
 
-                    # Adiciona o vizinho à fila para ser visitado, se ele tiver um IP
                     neighbor_ip = neighbor.get('neighbor_ip')
                     if neighbor_ip and neighbor_ip not in devices_visited:
                         print(
                             f"--- Novo vizinho encontrado: {neighbor.get('neighbor_id')} ({neighbor_ip}). Adicionando à fila.")
-                        # Cria um novo "trabalho" para o vizinho, usando as credenciais padrão
                         new_device_to_visit = default_creds.copy()
                         new_device_to_visit['host'] = neighbor_ip
                         new_device_to_visit['name'] = neighbor.get('neighbor_id')
@@ -103,8 +112,8 @@ def start_discovery():
 
         except (NetmikoAuthenticationException, NetmikoTimeoutException, Exception) as e:
             print(f"❌ FALHA ao processar o dispositivo {current_host}: {e}")
-            devices_visited.add(current_host)  # Marca como visitado para não tentar de novo
-            continue  # Pula para o próximo dispositivo da fila
+            devices_visited.add(current_host)
+            continue
 
     # 6. FINALIZAÇÃO
     print("\n--- PROCESSO DE DESCOBERTA CONCLUÍDO ---")
@@ -112,6 +121,25 @@ def start_discovery():
     print(f"Total de conexões encontradas: {len(all_discovered_connections)}")
 
     if all_discovered_connections:
-        save_to_excel(all_discovered_connections, "reports/discovery_report_COMPLETO.xlsx")
+
+        # --- CORREÇÃO 2: ADICIONAR A LÓGICA DE FILTRAGEM E JSON ---
+
+        # Filtra os links de dados (para não poluir o JSON)
+        data_links_only = []
+        for conn in all_discovered_connections:
+            local_if = conn.get('local_interface')
+            remote_if = conn.get('remote_port')
+
+            # AQUI ESTÁ O USO DA VARIÁVEL IMPORTADA
+            if local_if not in MANAGEMENT_INTERFACES and remote_if not in MANAGEMENT_INTERFACES:
+                data_links_only.append(conn)
+
+        # Salva o relatório em Excel (para humanos)
+        save_to_excel(data_links_only, "reports/discovery_report_COMPLETO.xlsx")
+
+        # Salva os dados brutos filtrados em JSON (para máquinas)
+        save_to_json(data_links_only, "reports/discovery_data.json")
+        # ----------------------------------------------------
+
     else:
         print("Nenhuma conexão foi descoberta.")

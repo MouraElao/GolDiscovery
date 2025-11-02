@@ -1,7 +1,7 @@
 # Em src/goldiscovery/utils/formatting.py
 
 import pandas as pd
-
+import json
 # Define as interfaces que consideramos de gerenciamento
 MANAGEMENT_INTERFACES = {'FastEthernet0/1'}
 
@@ -95,3 +95,16 @@ def save_to_excel(list_of_connections: list[dict], filename: str):
 
     except Exception as e:
         print(f"\n❌ FALHA ao salvar o relatório Excel: {e}")
+
+def save_to_json(data: list[dict], filename: str):
+    """
+    Salva uma lista de dicionários diretamente em um arquivo JSON formatado.
+    """
+    print(f"\n>>> Salvando dados brutos em JSON...")
+    try:
+        with open(filename, 'w') as json_file:
+            # indent=4 torna o arquivo JSON legível para humanos
+            json.dump(data, json_file, indent=4)
+        print(f"✅ Dados JSON salvos com sucesso em: {filename}")
+    except Exception as e:
+        print(f"\n❌ FALHA ao salvar o relatório JSON: {e}")
